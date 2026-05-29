@@ -1,0 +1,12 @@
+# Binaries
+filemanager
+
+# Uploaded files
+storage/
+
+# Environment
+.env.local
+.env
+
+# IDE
+.DS_Store
