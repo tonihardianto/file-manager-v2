@@ -28,8 +28,8 @@ type Response struct {
 }
 
 const (
-	// MaxUploadSize sets the file size limit to 500 MB
-	MaxUploadSize     = 500 * 1024 * 1024
+	// MaxUploadSize sets the file size limit to 1 GB
+	MaxUploadSize     = 1 * 1024 * 1024 * 1024
 	sessionCookieName = "fm_session"
 	csrfCookieName    = "fm_csrf"
 	csrfHeaderName    = "X-CSRF-Token"
@@ -608,7 +608,7 @@ func MakeTokenGenHandler(metaStore database.MetadataStore) http.HandlerFunc {
 		// Create token valid for 5 minutes
 		validity := 5 * time.Minute
 		token := security.GenerateDownloadToken(req.SystemName, validity)
-		downloadURL := fmt.Sprintf("/api/download?token=%s", token)
+		downloadURL := fmt.Sprintf("/download?token=%s", token)
 
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(Response{

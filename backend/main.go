@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 )
 
 func main() {
@@ -77,6 +78,7 @@ func main() {
 	mux.HandleFunc("DELETE /api/trash/{systemName}", handlers.RequireAuth(handlers.RequireCSRF(handlers.MakeHardDeleteFileHandler(localStorage, metaStore))))
 	mux.HandleFunc("POST /api/token", handlers.RequireAuth(handlers.RequireCSRF(handlers.MakeTokenGenHandler(metaStore))))
 	mux.HandleFunc("GET /api/download", handlers.MakeDownloadHandler(localStorage, metaStore))
+	mux.HandleFunc("GET /download", handlers.MakeDownloadHandler(localStorage, metaStore))
 
 	// Serving the React Frontend static files
 	fileServer := http.FileServer(http.FS(distFS))
@@ -113,11 +115,40 @@ func main() {
 	// Read port configuration
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = "8081"
 	}
 
+	// Wrap the mux with a middleware that honors common proxy headers
+	handler := proxyHeadersMiddleware(mux)
+
 	log.Printf("Server running on http://localhost:%s", port)
-	if err := http.ListenAndServe(":"+port, mux); err != nil {
+	if err := http.ListenAndServe(":"+port, handler); err != nil {
 		log.Fatalf("Server startup failed: %v", err)
 	}
+}
+
+// proxyHeadersMiddleware adjusts request properties based on common
+// reverse-proxy headers so the app behaves correctly behind Apache2.
+func proxyHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Respect X-Forwarded-For: use the left-most entry as client IP
+		if xf := r.Header.Get("X-Forwarded-For"); xf != "" {
+			parts := strings.Split(xf, ",")
+			if len(parts) > 0 {
+				r.RemoteAddr = strings.TrimSpace(parts[0])
+			}
+		}
+
+		// Respect X-Forwarded-Proto so generated URLs or scheme checks work
+		if xp := r.Header.Get("X-Forwarded-Proto"); xp != "" {
+			r.URL.Scheme = xp
+		}
+
+		// Respect X-Forwarded-Host to preserve original Host header
+		if xh := r.Header.Get("X-Forwarded-Host"); xh != "" {
+			r.Host = xh
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }

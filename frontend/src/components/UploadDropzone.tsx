@@ -119,7 +119,7 @@ export default function UploadDropzone({ onUpload, progress }: Props) {
               <span style={{ color: '#7c3aed', textDecoration: 'underline', textUnderlineOffset: 2 }}>
                 browse files
               </span>
-              {' '}· max 500 MB per file
+              {' '}· max 1 GB/ 1024 MB per file
             </p>
           )}
         </div>
