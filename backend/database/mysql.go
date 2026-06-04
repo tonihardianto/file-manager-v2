@@ -32,8 +32,8 @@ func NewMySQLStore(dsn string) (*MySQLStore, error) {
 
 func (s *MySQLStore) SaveFileMetadata(ctx context.Context, meta FileMetadata) error {
 	query := `
-		INSERT INTO files (nama_file_asli, nama_file_sistem, path, ukuran, mime_type, folder_id, waktu_diunggah)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO files (nama_file_asli, nama_file_sistem, path, ukuran, mime_type, is_public, folder_id, waktu_diunggah)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`
 	// Note: in a real implementation, path might be different from systemName,
 	// but here we just store systemName as path for simplicity since local storage uses it directly.
@@ -43,6 +43,7 @@ func (s *MySQLStore) SaveFileMetadata(ctx context.Context, meta FileMetadata) er
 		meta.SystemName, // Using SystemName for path for now
 		meta.Size,
 		meta.MimeType,
+		meta.IsPublic,
 		meta.FolderID,
 		meta.UploadedAt,
 	)
@@ -54,7 +55,7 @@ func (s *MySQLStore) SaveFileMetadata(ctx context.Context, meta FileMetadata) er
 
 func (s *MySQLStore) GetFileMetadata(ctx context.Context, systemName string) (FileMetadata, error) {
 	query := `
-		SELECT nama_file_asli, nama_file_sistem, ukuran, mime_type, folder_id, waktu_diunggah, jumlah_download, jumlah_share, is_starred
+		SELECT nama_file_asli, nama_file_sistem, ukuran, mime_type, is_public, folder_id, waktu_diunggah, jumlah_download, jumlah_share, is_starred
 		FROM files
 		WHERE nama_file_sistem = ? AND waktu_dihapus IS NULL
 	`
@@ -65,6 +66,7 @@ func (s *MySQLStore) GetFileMetadata(ctx context.Context, systemName string) (Fi
 		&meta.SystemName,
 		&meta.Size,
 		&meta.MimeType,
+		&meta.IsPublic,
 		&folder,
 		&meta.UploadedAt,
 		&meta.DownloadCount,
@@ -85,7 +87,7 @@ func (s *MySQLStore) GetFileMetadata(ctx context.Context, systemName string) (Fi
 
 func (s *MySQLStore) ListFiles(ctx context.Context) ([]FileMetadata, error) {
 	query := `
-		SELECT nama_file_asli, nama_file_sistem, ukuran, mime_type, folder_id, waktu_diunggah, jumlah_download, jumlah_share, is_starred
+		SELECT nama_file_asli, nama_file_sistem, ukuran, mime_type, is_public, folder_id, waktu_diunggah, jumlah_download, jumlah_share, is_starred
 		FROM files
 		WHERE waktu_dihapus IS NULL
 		ORDER BY waktu_diunggah DESC
@@ -105,6 +107,7 @@ func (s *MySQLStore) ListFiles(ctx context.Context) ([]FileMetadata, error) {
 			&meta.SystemName,
 			&meta.Size,
 			&meta.MimeType,
+			&meta.IsPublic,
 			&folder,
 			&meta.UploadedAt,
 			&meta.DownloadCount,
@@ -126,6 +129,50 @@ func (s *MySQLStore) ListFiles(ctx context.Context) ([]FileMetadata, error) {
 	return list, nil
 }
 
+func (s *MySQLStore) ListPublicFiles(ctx context.Context) ([]FileMetadata, error) {
+	query := `
+		SELECT nama_file_asli, nama_file_sistem, ukuran, mime_type, is_public, folder_id, waktu_diunggah, jumlah_download, jumlah_share, is_starred
+		FROM files
+		WHERE waktu_dihapus IS NULL AND is_public = 1
+		ORDER BY waktu_diunggah DESC
+	`
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list public files: %w", err)
+	}
+	defer rows.Close()
+
+	var list []FileMetadata
+	for rows.Next() {
+		var meta FileMetadata
+		var folder sql.NullInt64
+		if err := rows.Scan(
+			&meta.OriginalName,
+			&meta.SystemName,
+			&meta.Size,
+			&meta.MimeType,
+			&meta.IsPublic,
+			&folder,
+			&meta.UploadedAt,
+			&meta.DownloadCount,
+			&meta.ShareCount,
+			&meta.Starred,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan public file row: %w", err)
+		}
+		if folder.Valid {
+			meta.FolderID = &folder.Int64
+		}
+		list = append(list, meta)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating public file rows: %w", err)
+	}
+
+	return list, nil
+}
+
 func (s *MySQLStore) ListFilesPaginated(ctx context.Context, limit, offset int64) ([]FileMetadata, int64, error) {
 	var total int64
 	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM files WHERE waktu_dihapus IS NULL").Scan(&total); err != nil {
@@ -133,7 +180,7 @@ func (s *MySQLStore) ListFilesPaginated(ctx context.Context, limit, offset int64
 	}
 
 	query := `
-		SELECT nama_file_asli, nama_file_sistem, ukuran, mime_type, folder_id, waktu_diunggah, jumlah_download, jumlah_share, is_starred
+		SELECT nama_file_asli, nama_file_sistem, ukuran, mime_type, is_public, folder_id, waktu_diunggah, jumlah_download, jumlah_share, is_starred
 		FROM files
 		WHERE waktu_dihapus IS NULL
 		ORDER BY waktu_diunggah DESC
@@ -154,6 +201,7 @@ func (s *MySQLStore) ListFilesPaginated(ctx context.Context, limit, offset int64
 			&meta.SystemName,
 			&meta.Size,
 			&meta.MimeType,
+			&meta.IsPublic,
 			&folder,
 			&meta.UploadedAt,
 			&meta.DownloadCount,
@@ -177,7 +225,7 @@ func (s *MySQLStore) ListFilesPaginated(ctx context.Context, limit, offset int64
 
 func (s *MySQLStore) ListFilesByFolder(ctx context.Context, folderID int64) ([]FileMetadata, error) {
 	query := `
-		SELECT nama_file_asli, nama_file_sistem, ukuran, mime_type, folder_id, waktu_diunggah, jumlah_download, jumlah_share, is_starred
+		SELECT nama_file_asli, nama_file_sistem, ukuran, mime_type, is_public, folder_id, waktu_diunggah, jumlah_download, jumlah_share, is_starred
 		FROM files
 		WHERE waktu_dihapus IS NULL AND folder_id = ?
 		ORDER BY waktu_diunggah DESC
@@ -197,6 +245,7 @@ func (s *MySQLStore) ListFilesByFolder(ctx context.Context, folderID int64) ([]F
 			&meta.SystemName,
 			&meta.Size,
 			&meta.MimeType,
+			&meta.IsPublic,
 			&folder,
 			&meta.UploadedAt,
 			&meta.DownloadCount,
@@ -220,7 +269,7 @@ func (s *MySQLStore) ListFilesByFolder(ctx context.Context, folderID int64) ([]F
 
 func (s *MySQLStore) ListTrashFiles(ctx context.Context) ([]FileMetadata, error) {
 	query := `
-		SELECT nama_file_asli, nama_file_sistem, ukuran, mime_type, folder_id, waktu_diunggah, waktu_dihapus, jumlah_download, jumlah_share, is_starred
+		SELECT nama_file_asli, nama_file_sistem, ukuran, mime_type, is_public, folder_id, waktu_diunggah, waktu_dihapus, jumlah_download, jumlah_share, is_starred
 		FROM files
 		WHERE waktu_dihapus IS NOT NULL
 		ORDER BY waktu_dihapus DESC
@@ -241,6 +290,7 @@ func (s *MySQLStore) ListTrashFiles(ctx context.Context) ([]FileMetadata, error)
 			&meta.SystemName,
 			&meta.Size,
 			&meta.MimeType,
+			&meta.IsPublic,
 			&folder,
 			&meta.UploadedAt,
 			&deletedAt,
@@ -362,6 +412,19 @@ func (s *MySQLStore) SetFileStarred(ctx context.Context, systemName string, star
 	res, err := s.db.ExecContext(ctx, query, starred, systemName)
 	if err != nil {
 		return fmt.Errorf("failed to set starred state: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("file metadata not found for %s", systemName)
+	}
+	return nil
+}
+
+func (s *MySQLStore) SetFilePublic(ctx context.Context, systemName string, isPublic bool) error {
+	query := `UPDATE files SET is_public = ? WHERE nama_file_sistem = ? AND waktu_dihapus IS NULL`
+	res, err := s.db.ExecContext(ctx, query, isPublic, systemName)
+	if err != nil {
+		return fmt.Errorf("failed to set public state: %w", err)
 	}
 	rows, _ := res.RowsAffected()
 	if rows == 0 {

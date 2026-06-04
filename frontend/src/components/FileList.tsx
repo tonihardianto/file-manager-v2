@@ -15,6 +15,7 @@ export type FileMeta = {
   downloadCount?: number
   shareCount?: number
   starred?: boolean
+  isPublic?: boolean
 }
 
 function formatBytes(bytes: number): string {
@@ -93,6 +94,7 @@ interface Props {
   folderOptions?: Array<{ id: number; name: string }>
   getFolderLabel?: (folderId?: number) => string
   onToggleStar?: (systemName: string) => void
+  onTogglePublic?: (systemName: string) => void
   isStarred?: (systemName: string) => boolean
   selectionEnabled?: boolean
   selectedSystemNames?: string[]
@@ -100,7 +102,7 @@ interface Props {
   onSelectAllVisible?: (systemNames: string[], checked: boolean) => void
 }
 
-export default function FileList({ files, view, onDelete, onGenerate, onRequestMove, folderOptions = [], getFolderLabel, onToggleStar, isStarred, selectionEnabled = false, selectedSystemNames = [], onToggleSelect, onSelectAllVisible }: Props) {
+export default function FileList({ files, view, onDelete, onGenerate, onRequestMove, folderOptions = [], getFolderLabel, onToggleStar, onTogglePublic, isStarred, selectionEnabled = false, selectedSystemNames = [], onToggleSelect, onSelectAllVisible }: Props) {
   if (!files.length) {
     return (
       <div style={{
@@ -125,23 +127,23 @@ export default function FileList({ files, view, onDelete, onGenerate, onRequestM
   }
 
   if (view === 'grid') {
-    return <GridView files={files} onDelete={onDelete} onGenerate={onGenerate} onRequestMove={onRequestMove} folderOptions={folderOptions} getFolderLabel={getFolderLabel} onToggleStar={onToggleStar} isStarred={isStarred} selectionEnabled={selectionEnabled} selectedSystemNames={selectedSystemNames} onToggleSelect={onToggleSelect} />
+    return <GridView files={files} onDelete={onDelete} onGenerate={onGenerate} onRequestMove={onRequestMove} folderOptions={folderOptions} getFolderLabel={getFolderLabel} onToggleStar={onToggleStar} onTogglePublic={onTogglePublic} isStarred={isStarred} selectionEnabled={selectionEnabled} selectedSystemNames={selectedSystemNames} onToggleSelect={onToggleSelect} />
   }
 
-  return <ListView files={files} onDelete={onDelete} onGenerate={onGenerate} onRequestMove={onRequestMove} folderOptions={folderOptions} getFolderLabel={getFolderLabel} onToggleStar={onToggleStar} isStarred={isStarred} selectionEnabled={selectionEnabled} selectedSystemNames={selectedSystemNames} onToggleSelect={onToggleSelect} onSelectAllVisible={onSelectAllVisible} />
+  return <ListView files={files} onDelete={onDelete} onGenerate={onGenerate} onRequestMove={onRequestMove} folderOptions={folderOptions} getFolderLabel={getFolderLabel} onToggleStar={onToggleStar} onTogglePublic={onTogglePublic} isStarred={isStarred} selectionEnabled={selectionEnabled} selectedSystemNames={selectedSystemNames} onToggleSelect={onToggleSelect} onSelectAllVisible={onSelectAllVisible} />
 }
 
-function GridView({ files, onDelete, onGenerate, onRequestMove, folderOptions, getFolderLabel, onToggleStar, isStarred, selectionEnabled, selectedSystemNames, onToggleSelect }: Omit<Props, 'view' | 'onSelectAllVisible'>) {
+function GridView({ files, onDelete, onGenerate, onRequestMove, folderOptions, getFolderLabel, onToggleStar, onTogglePublic, isStarred, selectionEnabled, selectedSystemNames, onToggleSelect }: Omit<Props, 'view' | 'onSelectAllVisible'>) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12 }}>
       {files.map((f) => (
-        <GridCard key={f.systemName} file={f} onDelete={onDelete} onGenerate={onGenerate} onRequestMove={onRequestMove} folderOptions={folderOptions} getFolderLabel={getFolderLabel} onToggleStar={onToggleStar} isStarred={isStarred} selectionEnabled={selectionEnabled} selected={selectedSystemNames?.includes(f.systemName) ?? false} onToggleSelect={onToggleSelect} />
+        <GridCard key={f.systemName} file={f} onDelete={onDelete} onGenerate={onGenerate} onRequestMove={onRequestMove} folderOptions={folderOptions} getFolderLabel={getFolderLabel} onToggleStar={onToggleStar} onTogglePublic={onTogglePublic} isStarred={isStarred} selectionEnabled={selectionEnabled} selected={selectedSystemNames?.includes(f.systemName) ?? false} onToggleSelect={onToggleSelect} />
       ))}
     </div>
   )
 }
 
-function GridCard({ file: f, onDelete, onGenerate, onRequestMove, folderOptions = [], getFolderLabel, onToggleStar, isStarred, selectionEnabled, selected, onToggleSelect }: {
+function GridCard({ file: f, onDelete, onGenerate, onRequestMove, folderOptions = [], getFolderLabel, onToggleStar, onTogglePublic, isStarred, selectionEnabled, selected, onToggleSelect }: {
   file: FileMeta
   onDelete: (s: string) => void
   onGenerate: (s: string) => void
@@ -149,6 +151,7 @@ function GridCard({ file: f, onDelete, onGenerate, onRequestMove, folderOptions 
   folderOptions?: Array<{ id: number; name: string }>
   getFolderLabel?: (folderId?: number) => string
   onToggleStar?: (s: string) => void
+  onTogglePublic?: (s: string) => void
   isStarred?: (s: string) => boolean
   selectionEnabled?: boolean
   selected?: boolean
@@ -209,6 +212,7 @@ function GridCard({ file: f, onDelete, onGenerate, onRequestMove, folderOptions 
           onRequestMove={onRequestMove}
           folderOptions={folderOptions}
           onToggleStar={onToggleStar}
+          onTogglePublic={onTogglePublic}
           compact
           onOpenChange={setMenuOpen}
         />
@@ -217,7 +221,7 @@ function GridCard({ file: f, onDelete, onGenerate, onRequestMove, folderOptions 
   )
 }
 
-function ListView({ files, onDelete, onGenerate, onRequestMove, folderOptions, getFolderLabel, onToggleStar, isStarred, selectionEnabled, selectedSystemNames, onToggleSelect, onSelectAllVisible }: Omit<Props, 'view'>) {
+function ListView({ files, onDelete, onGenerate, onRequestMove, folderOptions, getFolderLabel, onToggleStar, onTogglePublic, isStarred, selectionEnabled, selectedSystemNames, onToggleSelect, onSelectAllVisible }: Omit<Props, 'view'>) {
   const allVisibleSelected = files.length > 0 && files.every((f) => selectedSystemNames?.includes(f.systemName))
   const hasSomeSelected = files.some((f) => selectedSystemNames?.includes(f.systemName))
   const selectAllRef = useRef<HTMLInputElement | null>(null)
@@ -274,6 +278,7 @@ function ListView({ files, onDelete, onGenerate, onRequestMove, folderOptions, g
           folderOptions={folderOptions}
           getFolderLabel={getFolderLabel}
           onToggleStar={onToggleStar}
+          onTogglePublic={onTogglePublic}
           isStarred={isStarred}
           selectionEnabled={selectionEnabled}
           selected={selectedSystemNames?.includes(f.systemName) ?? false}
@@ -284,7 +289,7 @@ function ListView({ files, onDelete, onGenerate, onRequestMove, folderOptions, g
   )
 }
 
-function ListRow({ file: f, odd, onDelete, onGenerate, onRequestMove, folderOptions = [], getFolderLabel, onToggleStar, isStarred, selectionEnabled, selected, onToggleSelect }: {
+function ListRow({ file: f, odd, onDelete, onGenerate, onRequestMove, folderOptions = [], getFolderLabel, onToggleStar, onTogglePublic, isStarred, selectionEnabled, selected, onToggleSelect }: {
   file: FileMeta
   odd: boolean
   onDelete: (s: string) => void
@@ -293,6 +298,7 @@ function ListRow({ file: f, odd, onDelete, onGenerate, onRequestMove, folderOpti
   folderOptions?: Array<{ id: number; name: string }>
   getFolderLabel?: (folderId?: number) => string
   onToggleStar?: (s: string) => void
+  onTogglePublic?: (s: string) => void
   isStarred?: (s: string) => boolean
   selectionEnabled?: boolean
   selected?: boolean
@@ -352,6 +358,7 @@ function ListRow({ file: f, odd, onDelete, onGenerate, onRequestMove, folderOpti
           onRequestMove={onRequestMove}
           folderOptions={folderOptions}
           onToggleStar={onToggleStar}
+          onTogglePublic={onTogglePublic}
         />
       </div>
     </div>
@@ -366,6 +373,7 @@ function ActionMenu({
   onRequestMove,
   folderOptions,
   onToggleStar,
+  onTogglePublic,
   compact = false,
   onOpenChange,
 }: {
@@ -376,6 +384,7 @@ function ActionMenu({
   onRequestMove?: (payload: { systemName: string; fileName: string; folderId?: number; folderLabel: string }) => void
   folderOptions?: Array<{ id: number; name: string }>
   onToggleStar?: (systemName: string) => void
+  onTogglePublic?: (systemName: string) => void
   compact?: boolean
   onOpenChange?: (open: boolean) => void
 }) {
@@ -443,6 +452,7 @@ function ActionMenu({
         ref={btnRef}
         title="Actions"
         onClick={handleToggle}
+        className="fm-action-trigger"
         style={{
           width: compact ? 28 : 30,
           height: compact ? 28 : 30,
@@ -462,20 +472,26 @@ function ActionMenu({
       {open && menuPos && createPortal(
         <div ref={dropRef} style={{ position: 'fixed', top: menuPos.top, right: menuPos.right, minWidth: 190, zIndex: 9999, borderRadius: 10, border: '1px solid var(--c-border)', background: 'var(--c-panel)', boxShadow: '0 10px 26px rgba(0,0,0,0.32)', padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {onToggleStar && (
-            <button onClick={() => { onToggleStar(file.systemName); setOpen(false) }} style={{ border: 'none', background: 'transparent', color: 'var(--c-text-3)', cursor: 'pointer', textAlign: 'left', fontSize: 12, padding: '6px 8px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button className="fm-action-item" onClick={() => { onToggleStar(file.systemName); setOpen(false) }} style={{ border: 'none', background: 'transparent', color: 'var(--c-text-3)', cursor: 'pointer', textAlign: 'left', fontSize: 12, padding: '6px 8px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
               <Star size={14} />
               <span>{starred ? 'Unstar' : 'Star'}</span>
             </button>
           )}
-          <button onClick={() => { void downloadFile(file.systemName); setOpen(false) }} style={{ border: 'none', background: 'transparent', color: 'var(--c-text-3)', cursor: 'pointer', textAlign: 'left', fontSize: 12, padding: '6px 8px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+          {onTogglePublic && (
+            <button className="fm-action-item" onClick={() => { onTogglePublic(file.systemName); setOpen(false) }} style={{ border: 'none', background: 'transparent', color: file.isPublic ? '#f59e0b' : 'var(--c-text-3)', cursor: 'pointer', textAlign: 'left', fontSize: 12, padding: '6px 8px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Link2 size={14} />
+              <span>{file.isPublic ? 'Set private' : 'Set public'}</span>
+            </button>
+          )}
+          <button className="fm-action-item" onClick={() => { void downloadFile(file.systemName); setOpen(false) }} style={{ border: 'none', background: 'transparent', color: 'var(--c-text-3)', cursor: 'pointer', textAlign: 'left', fontSize: 12, padding: '6px 8px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
             <Download size={14} />
             <span>Download</span>
           </button>
-          <button onClick={() => { onGenerate(file.systemName); setOpen(false) }} style={{ border: 'none', background: 'transparent', color: 'var(--c-text-3)', cursor: 'pointer', textAlign: 'left', fontSize: 12, padding: '6px 8px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button className="fm-action-item" onClick={() => { onGenerate(file.systemName); setOpen(false) }} style={{ border: 'none', background: 'transparent', color: 'var(--c-text-3)', cursor: 'pointer', textAlign: 'left', fontSize: 12, padding: '6px 8px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
             <Link2 size={14} />
             <span>Share link</span>
           </button>
-          <button onClick={() => { onDelete(file.systemName); setOpen(false) }} style={{ border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer', textAlign: 'left', fontSize: 12, padding: '6px 8px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button className="fm-action-item fm-action-item-danger" onClick={() => { onDelete(file.systemName); setOpen(false) }} style={{ border: 'none', background: 'transparent', color: '#ef4444', cursor: 'pointer', textAlign: 'left', fontSize: 12, padding: '6px 8px', borderRadius: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
             <Trash2 size={14} />
             <span>Delete</span>
           </button>

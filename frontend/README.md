@@ -94,3 +94,17 @@ Notes:
 - During development you can run the frontend dev server with `npm run dev` inside `frontend/` and run the backend separately. Use CORS or Vite proxy to forward `/api` calls to the backend.
 - The frontend expects backend API endpoints under `/api/*` when served by the embedded binary.
 
+## Reusing this UI in other projects
+
+This repository now includes a reusable UI kit entry at `src/uikit/`.
+
+- Exports: `src/uikit/index.ts`
+- Shared theme tokens: `src/uikit/theme.css`
+- Integration notes: `src/uikit/README.md`
+
+Quick start in another React project:
+
+1. Copy `src/uikit/` and the required component files from `src/components/`.
+2. Import the shared theme in your CSS entry file.
+3. Import components from your local `uikit` entry.
+

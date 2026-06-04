@@ -25,7 +25,13 @@ export default function UploadDropzone({ onUpload, progress }: Props) {
   const [staged, setStaged] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
 
-  const isActive = uploading || (progress && progress.length > 0)
+  const hasProgress = Boolean(progress && progress.length > 0)
+  const hasInFlightProgress = Boolean(progress?.some((entry) => {
+    const st = entry.status ?? 'pending'
+    return st === 'pending' || st === 'uploading' || (entry.percent ?? 0) < 100
+  }))
+  const isComplete = hasProgress && !hasInFlightProgress
+  const isActive = uploading || hasInFlightProgress
 
   // ── Staging ────────────────────────────────────────────────────────────
 
@@ -107,7 +113,7 @@ export default function UploadDropzone({ onUpload, progress }: Props) {
         </div>
         <div style={{ textAlign: 'center' }}>
           <p style={{ margin: 0, fontSize: 14, fontWeight: 500, color: dragging ? '#c4b5fd' : 'var(--c-text-3)' }}>
-            {dragging ? 'Release to stage' : isActive ? `Upload in progress… ${overallPercent}%` : 'Drop files here'}
+            {dragging ? 'Release to stage' : isActive ? `Upload in progress… ${overallPercent}%` : isComplete ? 'Upload complete' : 'Drop files here'}
           </p>
           {isActive && !dragging ? (
             <div style={{ marginTop: 8, width: 160, height: 3, borderRadius: 999, background: 'var(--c-border)', overflow: 'hidden', margin: '8px auto 0' }}>
@@ -115,11 +121,15 @@ export default function UploadDropzone({ onUpload, progress }: Props) {
             </div>
           ) : (
             <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--c-text-5)' }}>
-              or{' '}
-              <span style={{ color: '#7c3aed', textDecoration: 'underline', textUnderlineOffset: 2 }}>
-                browse files
-              </span>
-              {' '}· max 1 GB/ 1024 MB per file
+              {isComplete ? 'Ready for next upload' : (
+                <>
+                  or{' '}
+                  <span style={{ color: '#7c3aed', textDecoration: 'underline', textUnderlineOffset: 2 }}>
+                    browse files
+                  </span>
+                  {' '}· max 1 GB or 1024 MB per file
+                </>
+              )}
             </p>
           )}
         </div>

@@ -105,7 +105,7 @@ export default function Login({ onSuccess, notice, theme, onToggleTheme }: Props
             </svg>
           </div>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: 'var(--c-text-bright)', letterSpacing: '-0.02em' }}>
-            FileManager
+            SMC Drive
           </h1>
           <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--c-text-4)' }}>
             Internal access · secure storage
@@ -125,7 +125,7 @@ export default function Login({ onSuccess, notice, theme, onToggleTheme }: Props
             Sign in
           </h2>
           <p style={{ margin: '0 0 24px', fontSize: 13, color: 'var(--c-text-4)' }}>
-            Use your company credentials
+            Use SMC Drive credentials
           </p>
 
           {notice && (
@@ -211,7 +211,7 @@ export default function Login({ onSuccess, notice, theme, onToggleTheme }: Props
         </div>
 
         <p style={{ textAlign: 'center', fontSize: 11, marginTop: 24, color: 'var(--c-text-6)' }}>
-          © {new Date().getFullYear()} Internal FileManager · All rights reserved
+          © {new Date().getFullYear()} SMC Drive · All rights reserved
         </p>
       </div>
     </div>

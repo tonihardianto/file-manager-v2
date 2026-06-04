@@ -24,6 +24,7 @@ type FileMetadata struct {
 	OriginalName  string     `json:"originalName"`
 	MimeType      string     `json:"mimeType"`
 	Size          int64      `json:"size"`
+	IsPublic      bool       `json:"isPublic"`
 	FolderID      *int64     `json:"folderId,omitempty"`
 	UploadedAt    time.Time  `json:"uploadedAt"`
 	DeletedAt     *time.Time `json:"deletedAt,omitempty"`
@@ -52,6 +53,9 @@ type MetadataStore interface {
 
 	// ListFiles returns all active (non-deleted) files in the system.
 	ListFiles(ctx context.Context) ([]FileMetadata, error)
+
+	// ListPublicFiles returns all active files marked as public.
+	ListPublicFiles(ctx context.Context) ([]FileMetadata, error)
 
 	// ListFilesPaginated returns a page of active files ordered by upload date desc,
 	// together with the total count of all active files.
@@ -83,6 +87,9 @@ type MetadataStore interface {
 
 	// SetFileStarred sets starred state for an active file.
 	SetFileStarred(ctx context.Context, systemName string, starred bool) error
+
+	// SetFilePublic sets public visibility state for an active file.
+	SetFilePublic(ctx context.Context, systemName string, isPublic bool) error
 
 	// CountStarredFiles returns total active files currently starred.
 	CountStarredFiles(ctx context.Context) (int64, error)

@@ -1,0 +1,60 @@
+@theme {
+  --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+}
+
+:root,
+[data-theme="dark"] {
+  --c-bg: #0d1117;
+  --c-bg-page-grad: linear-gradient(145deg, #0d1117 0%, #111827 52%, #0f172a 100%);
+  --c-topbar: rgba(17, 24, 39, 0.9);
+  --c-panel: rgba(17, 25, 40, 0.86);
+  --c-panel-subtle: rgba(23, 34, 56, 0.58);
+  --c-input-bg: rgba(29, 41, 63, 0.7);
+  --c-skeleton: rgba(35, 49, 75, 0.5);
+  --c-border: rgba(71, 85, 105, 0.55);
+  --c-border-subtle: rgba(71, 85, 105, 0.38);
+  --c-border-focus: rgba(66, 133, 244, 0.85);
+  --c-text: #e5edf8;
+  --c-text-bright: #f8fbff;
+  --c-text-2: #c9d7eb;
+  --c-text-3: #9fb3cf;
+  --c-text-4: #7d95b7;
+  --c-text-5: #647896;
+  --c-text-6: #4f6078;
+  --c-view-toggle: rgba(31, 46, 73, 0.75);
+  --c-view-active: rgba(66, 133, 244, 0.2);
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --c-bg: #f6f8fc;
+  --c-bg-page-grad: linear-gradient(145deg, #f8fbff 0%, #edf3ff 55%, #f7f9fe 100%);
+  --c-topbar: rgba(248, 250, 255, 0.88);
+  --c-panel: rgba(255, 255, 255, 0.94);
+  --c-panel-subtle: rgba(248, 251, 255, 0.92);
+  --c-input-bg: rgba(238, 244, 255, 0.9);
+  --c-skeleton: rgba(220, 230, 247, 0.75);
+  --c-border: rgba(192, 206, 229, 0.9);
+  --c-border-subtle: rgba(203, 216, 237, 0.65);
+  --c-border-focus: rgba(66, 133, 244, 0.85);
+  --c-text: #1f2a44;
+  --c-text-bright: #111b2f;
+  --c-text-2: #31415e;
+  --c-text-3: #4a5b7c;
+  --c-text-4: #647796;
+  --c-text-5: #8596b3;
+  --c-text-6: #aab6cc;
+  --c-view-toggle: rgba(236, 243, 255, 0.95);
+  --c-view-active: rgba(66, 133, 244, 0.14);
+  color-scheme: light;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}

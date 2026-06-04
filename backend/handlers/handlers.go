@@ -15,7 +15,9 @@ import (
 	"net/http"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -100,6 +102,36 @@ func RequireCSRF(next http.HandlerFunc) http.HandlerFunc {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
 			json.NewEncoder(w).Encode(Response{Status: "error", Message: "csrf validation failed"})
+			return
+		}
+
+		next(w, r)
+	}
+}
+
+// RequireAdmin ensures the session belongs to an admin user.
+func RequireAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie(sessionCookieName)
+		if err != nil || cookie.Value == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(Response{Status: "error", Message: "unauthorized"})
+			return
+		}
+
+		claims, err := security.VerifySessionToken(cookie.Value)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(Response{Status: "error", Message: "unauthorized"})
+			return
+		}
+
+		if !strings.EqualFold(strings.TrimSpace(claims.Role), "admin") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(Response{Status: "error", Message: "forbidden"})
 			return
 		}
 
@@ -286,6 +318,7 @@ func MakeListFilesHandler(metaStore database.MetadataStore) http.HandlerFunc {
 		rawFolderID := r.URL.Query().Get("folderId")
 		rawLimit := r.URL.Query().Get("limit")
 		rawOffset := r.URL.Query().Get("offset")
+		query := strings.TrimSpace(r.URL.Query().Get("q"))
 
 		// Folder-specific query — return all files for that folder (no pagination).
 		if rawFolderID != "" {
@@ -301,6 +334,9 @@ func MakeListFilesHandler(metaStore database.MetadataStore) http.HandlerFunc {
 				w.WriteHeader(http.StatusInternalServerError)
 				json.NewEncoder(w).Encode(Response{Status: "error", Message: "Failed to list files"})
 				return
+			}
+			if query != "" {
+				list = filterFilesByName(list, query)
 			}
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(Response{Status: "success", Data: list})
@@ -325,12 +361,40 @@ func MakeListFilesHandler(metaStore database.MetadataStore) http.HandlerFunc {
 					return
 				}
 			}
-			files, total, err := metaStore.ListFilesPaginated(r.Context(), limit, offset)
-			if err != nil {
-				log.Printf("Failed to list paginated files from DB: %v", err)
-				w.WriteHeader(http.StatusInternalServerError)
-				json.NewEncoder(w).Encode(Response{Status: "error", Message: "Failed to list files"})
-				return
+			var files []database.FileMetadata
+			var total int64
+
+			if query == "" {
+				var err error
+				files, total, err = metaStore.ListFilesPaginated(r.Context(), limit, offset)
+				if err != nil {
+					log.Printf("Failed to list paginated files from DB: %v", err)
+					w.WriteHeader(http.StatusInternalServerError)
+					json.NewEncoder(w).Encode(Response{Status: "error", Message: "Failed to list files"})
+					return
+				}
+			} else {
+				list, err := metaStore.ListFiles(r.Context())
+				if err != nil {
+					log.Printf("Failed to list files from DB: %v", err)
+					w.WriteHeader(http.StatusInternalServerError)
+					json.NewEncoder(w).Encode(Response{Status: "error", Message: "Failed to list files"})
+					return
+				}
+				filtered := filterFilesByName(list, query)
+				sort.Slice(filtered, func(i, j int) bool {
+					return filtered[i].UploadedAt.After(filtered[j].UploadedAt)
+				})
+				total = int64(len(filtered))
+				if offset >= total {
+					files = []database.FileMetadata{}
+				} else {
+					end := offset + limit
+					if end > total {
+						end = total
+					}
+					files = filtered[int(offset):int(end)]
+				}
 			}
 			type pagedResponse struct {
 				Files  []database.FileMetadata `json:"files"`
@@ -359,9 +423,28 @@ func MakeListFilesHandler(metaStore database.MetadataStore) http.HandlerFunc {
 			json.NewEncoder(w).Encode(Response{Status: "error", Message: "Failed to list files"})
 			return
 		}
+		if query != "" {
+			list = filterFilesByName(list, query)
+		}
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(Response{Status: "success", Data: list})
 	}
+}
+
+func filterFilesByName(files []database.FileMetadata, query string) []database.FileMetadata {
+	needle := strings.ToLower(strings.TrimSpace(query))
+	if needle == "" {
+		return files
+	}
+
+	filtered := make([]database.FileMetadata, 0, len(files))
+	for _, file := range files {
+		if strings.Contains(strings.ToLower(file.OriginalName), needle) {
+			filtered = append(filtered, file)
+		}
+	}
+
+	return filtered
 }
 
 // MakeCountSharedFilesHandler returns total active files that have been shared at least once.
@@ -397,6 +480,57 @@ func MakeCountStarredFilesHandler(metaStore database.MetadataStore) http.Handler
 
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(Response{Status: "success", Data: map[string]int64{"count": total}})
+	}
+}
+
+// MakeListPublicFilesHandler lists active files marked as public.
+func MakeListPublicFilesHandler(metaStore database.MetadataStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		list, err := metaStore.ListPublicFiles(r.Context())
+		if err != nil {
+			log.Printf("Failed to list public files from DB: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(Response{Status: "error", Message: "Failed to list public files"})
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(Response{Status: "success", Data: list})
+	}
+}
+
+// MakeToggleFilePublicHandler updates public visibility for an active file.
+func MakeToggleFilePublicHandler(metaStore database.MetadataStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		systemName := r.PathValue("systemName")
+		if systemName == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(Response{Status: "error", Message: "systemName path parameter is required"})
+			return
+		}
+
+		var req struct {
+			IsPublic *bool `json:"isPublic"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.IsPublic == nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(Response{Status: "error", Message: "isPublic boolean is required"})
+			return
+		}
+
+		if err := metaStore.SetFilePublic(r.Context(), systemName, *req.IsPublic); err != nil {
+			log.Printf("Failed to set public state for %s: %v", systemName, err)
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(Response{Status: "error", Message: "File not found or already deleted"})
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(Response{Status: "success", Message: "Public visibility updated"})
 	}
 }
 
@@ -437,6 +571,7 @@ func MakeToggleFileStarHandler(metaStore database.MetadataStore) http.HandlerFun
 func MakeListTrashFilesHandler(metaStore database.MetadataStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		query := strings.TrimSpace(r.URL.Query().Get("q"))
 
 		list, err := metaStore.ListTrashFiles(r.Context())
 		if err != nil {
@@ -444,6 +579,10 @@ func MakeListTrashFilesHandler(metaStore database.MetadataStore) http.HandlerFun
 			w.WriteHeader(http.StatusInternalServerError)
 			json.NewEncoder(w).Encode(Response{Status: "error", Message: "Failed to list trash files"})
 			return
+		}
+
+		if query != "" {
+			list = filterFilesByName(list, query)
 		}
 
 		w.WriteHeader(http.StatusOK)
@@ -607,6 +746,47 @@ func MakeTokenGenHandler(metaStore database.MetadataStore) http.HandlerFunc {
 
 		// Create token valid for 5 minutes
 		validity := 5 * time.Minute
+		token := security.GenerateDownloadToken(req.SystemName, validity)
+		downloadURL := fmt.Sprintf("/download?token=%s", token)
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(Response{
+			Status: "success",
+			Data: TokenResponse{
+				Token:       token,
+				DownloadURL: downloadURL,
+				ExpiresAt:   time.Now().Add(validity).UnixMilli(),
+			},
+		})
+	}
+}
+
+// MakePublicTokenGenHandler generates a short-lived download token for public files.
+func MakePublicTokenGenHandler(metaStore database.MetadataStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		var req TokenRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(Response{Status: "error", Message: "Invalid request body"})
+			return
+		}
+
+		if req.SystemName == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(Response{Status: "error", Message: "systemName is required"})
+			return
+		}
+
+		meta, err := metaStore.GetFileMetadata(r.Context(), req.SystemName)
+		if err != nil || !meta.IsPublic {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(Response{Status: "error", Message: "Public file not found"})
+			return
+		}
+
+		validity := 10 * time.Minute
 		token := security.GenerateDownloadToken(req.SystemName, validity)
 		downloadURL := fmt.Sprintf("/download?token=%s", token)
 

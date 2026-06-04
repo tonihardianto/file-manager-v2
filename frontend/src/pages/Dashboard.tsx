@@ -45,9 +45,13 @@ function pushToast(setToasts: React.Dispatch<React.SetStateAction<ToastItem[]>>,
   setToasts((prev) => [...prev, makeToast(kind, message)].slice(-3))
 }
 
-const PAGE_SIZE = 50
+const PAGE_SIZE = 5
 
 export default function Dashboard({ user, onSignOut, theme, onToggleTheme }: Props) {
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.matchMedia('(max-width: 900px)').matches
+  })
   const [files, setFiles] = useState<FileMeta[]>([])
   // allFilesSnapshot: full unfiltered file list, used only for sidebar counts.
   // Never changes when entering a folder or switching sections.
@@ -67,6 +71,7 @@ export default function Dashboard({ user, onSignOut, theme, onToggleTheme }: Pro
   const [creatingFolder, setCreatingFolder] = useState(false)
   const [view, setView] = useState<'grid' | 'list'>(() => readViewMode())
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [activeSection, setActiveSection] = useState<DriveSection>('my-drive')
   const [selectMode, setSelectMode] = useState(false)
   const [starredCount, setStarredCount] = useState(0)
@@ -95,17 +100,19 @@ export default function Dashboard({ user, onSignOut, theme, onToggleTheme }: Pro
 
   const load = useCallback(async () => {
     setLoading(true)
+    const searchQuery = debouncedSearch.trim()
     const folderId = activeSection === 'my-drive' && folderFilterMode === 'folder' && selectedFolderId !== null
       ? selectedFolderId
       : undefined
 
-    // Paginate when showing all files in My Drive or Recent (no folder filter).
-    const usePagination = (activeSection === 'my-drive' || activeSection === 'recent') && folderId === undefined
+    // Paginate only when showing unfiltered My Drive or Recent (no folder or root filter).
+    const usePagination = (activeSection === 'my-drive' || activeSection === 'recent') && folderId === undefined && folderFilterMode !== 'root'
 
     if (usePagination) {
-      const [paged, trashFiles, folderItems, sharedTotal, starredTotal] = await Promise.all([
-        api.fetchFilesPaginated(PAGE_SIZE, 0),
-        api.fetchTrashFiles(),
+      const [paged, allFilesRaw, trashFiles, folderItems, sharedTotal, starredTotal] = await Promise.all([
+        api.fetchFilesPaginated(PAGE_SIZE, 0, searchQuery),
+        api.fetchFiles(undefined, searchQuery), // Full list for sidebar folder counts
+        api.fetchTrashFiles(searchQuery),
         api.fetchFolders(),
         api.fetchSharedFilesCount(),
         api.fetchStarredFilesCount(),
@@ -120,15 +127,15 @@ export default function Dashboard({ user, onSignOut, theme, onToggleTheme }: Pro
       setTrash(trashFiles
         .map((item) => ({ ...item, deletedAt: item.deletedAt ?? new Date().toISOString() }))
         .sort((a, b) => new Date(b.deletedAt).getTime() - new Date(a.deletedAt).getTime()))
-      // Refresh the unfiltered snapshot used for sidebar folder counts
-      setAllFilesSnapshot(paged.files)
+      // Refresh the unfiltered snapshot used for sidebar folder counts (full list, not paginated)
+      setAllFilesSnapshot(allFilesRaw)
     } else {
       // starred/shared need all files for client-side filtering; folder queries load that folder only.
       // Also fetch all files (no folderId filter) in parallel to refresh the sidebar snapshot.
       const [filesRaw, allFilesRaw, trashFiles, folderItems, sharedTotal, starredTotal] = await Promise.all([
-        api.fetchFiles(folderId),
-        api.fetchFiles(undefined), // unfiltered — for sidebar folder counts snapshot
-        api.fetchTrashFiles(),
+        api.fetchFiles(folderId, searchQuery),
+        api.fetchFiles(undefined, searchQuery), // search-filtered snapshot for current query
+        api.fetchTrashFiles(searchQuery),
         api.fetchFolders(),
         api.fetchSharedFilesCount(),
         api.fetchStarredFilesCount(),
@@ -152,17 +159,24 @@ export default function Dashboard({ user, onSignOut, theme, onToggleTheme }: Pro
         .sort((a, b) => new Date(b.deletedAt).getTime() - new Date(a.deletedAt).getTime()))
     }
     setLoading(false)
-  }, [activeSection, selectedFolderId, folderFilterMode])
+  }, [activeSection, selectedFolderId, folderFilterMode, debouncedSearch])
 
   async function loadMore() {
     if (!hasMore || loadingMore) return
     setLoadingMore(true)
-    const paged = await api.fetchFilesPaginated(PAGE_SIZE, files.length)
+    const paged = await api.fetchFilesPaginated(PAGE_SIZE, files.length, debouncedSearch)
     setFiles((prev) => [...prev, ...paged.files])
     setHasMore(paged.total > files.length + paged.files.length)
     setTotalCount(paged.total)
     setLoadingMore(false)
   }
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(search.trim())
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [search])
 
   async function handleCreateFolder() {
     const trimmed = newFolderName.trim()
@@ -188,6 +202,21 @@ export default function Dashboard({ user, onSignOut, theme, onToggleTheme }: Pro
   useEffect(() => {
     localStorage.setItem(VIEW_KEY, view)
   }, [view])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const media = window.matchMedia('(max-width: 900px)')
+    const onChange = (event: MediaQueryListEvent) => setIsMobile(event.matches)
+    setIsMobile(media.matches)
+    media.addEventListener('change', onChange)
+    return () => media.removeEventListener('change', onChange)
+  }, [])
+
+  useEffect(() => {
+    if (isMobile && view !== 'grid') {
+      setView('grid')
+    }
+  }, [isMobile, view])
 
   useEffect(() => {
     // Keep selection valid after file list changes.
@@ -414,6 +443,19 @@ export default function Dashboard({ user, onSignOut, theme, onToggleTheme }: Pro
     }
   }
 
+  async function togglePublic(systemName: string) {
+    const target = files.find((f) => f.systemName === systemName)
+    if (!target) return
+
+    try {
+      await api.setFilePublic(systemName, !(target.isPublic ?? false))
+      pushToast(setToasts, 'success', target.isPublic ? 'File set to private' : 'File set to public')
+      await load()
+    } catch {
+      pushToast(setToasts, 'error', 'Failed to update public visibility')
+    }
+  }
+
   function removeTrashRecord(systemName: string) {
     const target = trash.find((item) => item.systemName === systemName)
     if (!target) return
@@ -567,11 +609,13 @@ export default function Dashboard({ user, onSignOut, theme, onToggleTheme }: Pro
     return files
   })()
 
-  const filteredFiles = search.trim() ? baseFiles.filter((f) => f.originalName.toLowerCase().includes(search.toLowerCase())) : baseFiles
-  const filteredTrash = search.trim() ? trash.filter((f) => f.originalName.toLowerCase().includes(search.toLowerCase())) : trash
+  const filteredFiles = baseFiles
+  const filteredTrash = trash
 
   const isTrashView = activeSection === 'trash'
-  const showingCount = isTrashView ? filteredTrash.length : filteredFiles.length
+  const isAdminUser = (user.role ?? '').trim().toLowerCase() === 'admin'
+  // Section title badge: show server total when paginating (hasMore=active), else local filtered count
+  const showingCount = isTrashView ? filteredTrash.length : (hasMore ? totalCount : filteredFiles.length)
   const selectedFolder = folderFilterMode === 'folder' && selectedFolderId !== null ? folders.find((folder) => folder.id === selectedFolderId) : null
   const getFolderLabel = (folderId?: number) => {
     if (folderId == null) return 'Root'
@@ -592,12 +636,13 @@ export default function Dashboard({ user, onSignOut, theme, onToggleTheme }: Pro
             : 'My Drive'
 
   const recentCount = globalTotalCount
+  const effectiveView = isMobile ? 'grid' : view
 
   return (
     <div className="drive-layout" style={{ minHeight: '100vh', background: 'var(--c-bg)' }}>
       <ToastStack toasts={toasts} />
 
-      <aside style={{ borderRight: '1px solid var(--c-border-subtle)', padding: '22px 16px', display: 'flex', flexDirection: 'column', gap: 22 }}>
+      <aside style={{ borderRight: '1px solid var(--c-border-subtle)', padding: isMobile ? '14px 12px' : '22px 16px', display: 'flex', flexDirection: 'column', gap: isMobile ? 14 : 22, position: isMobile ? 'static' : 'sticky', top: 0, alignSelf: 'start', height: isMobile ? 'auto' : '100vh', overflowY: isMobile ? 'visible' : 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 8px' }}>
           <div style={{ width: 34, height: 34, borderRadius: 10, background: 'linear-gradient(145deg, #4285f4, #1a73e8)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth={2}>
@@ -637,6 +682,7 @@ export default function Dashboard({ user, onSignOut, theme, onToggleTheme }: Pro
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 160, overflowY: 'auto' }}>
             <button
+              className={`fm-folder-nav-item${folderFilterMode === 'all' ? ' is-active' : ''}`}
               onClick={() => {
                 setFolderFilterMode('all')
                 setSelectedFolderId(null)
@@ -651,6 +697,7 @@ export default function Dashboard({ user, onSignOut, theme, onToggleTheme }: Pro
                 </span>
             </button>
             <button
+              className={`fm-folder-nav-item${folderFilterMode === 'root' ? ' is-active' : ''}`}
               onClick={() => {
                 setFolderFilterMode('root')
                 setSelectedFolderId(null)
@@ -668,6 +715,7 @@ export default function Dashboard({ user, onSignOut, theme, onToggleTheme }: Pro
               <span style={{ fontSize: 11, color: 'var(--c-text-5)' }}>No folders yet</span>
             ) : folders.map((folder) => (
               <button
+                className={`fm-folder-nav-item${folderFilterMode === 'folder' && selectedFolderId === folder.id ? ' is-active' : ''}`}
                 key={folder.id}
                 onClick={() => {
                   setFolderFilterMode('folder')
@@ -694,15 +742,17 @@ export default function Dashboard({ user, onSignOut, theme, onToggleTheme }: Pro
       </aside>
 
       <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        <header style={{ position: 'sticky', top: 0, zIndex: 30, display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px', borderBottom: '1px solid var(--c-border-subtle)', background: 'var(--c-topbar)', backdropFilter: 'blur(8px)' }}>
-          <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
-            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="var(--c-text-4)" strokeWidth={2} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" />
-            </svg>
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search in Drive" style={{ width: '100%', maxWidth: 560, padding: '10px 14px 10px 40px', borderRadius: 24, border: '1px solid var(--c-border)', background: 'var(--c-input-bg)', color: 'var(--c-text-2)', fontSize: 13, outline: 'none' }} />
+        <header style={{ position: 'sticky', top: 0, zIndex: 30, display: 'flex', alignItems: 'center', flexWrap: isMobile ? 'wrap' : 'nowrap', gap: 12, padding: isMobile ? '10px 12px' : '12px 20px', borderBottom: '1px solid var(--c-border-subtle)', background: 'var(--c-topbar)', backdropFilter: 'blur(8px)' }}>
+          <div style={{ flex: 1, minWidth: isMobile ? '100%' : 0, order: isMobile ? 2 : 0, display: 'flex', justifyContent: isMobile ? 'stretch' : 'center' }}>
+            <div style={{ position: 'relative', width: '100%', maxWidth: isMobile ? '100%' : 560 }}>
+              <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="var(--c-text-4)" strokeWidth={2} style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)' }}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" />
+              </svg>
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search in Drive" style={{ width: '100%', padding: '10px 14px 10px 40px', borderRadius: 24, border: '1px solid var(--c-border)', background: 'var(--c-input-bg)', color: 'var(--c-text-2)', fontSize: 13, outline: 'none' }} />
+            </div>
           </div>
 
-          <button onClick={onToggleTheme} title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} style={{ width: 34, height: 34, borderRadius: '50%', border: '1px solid var(--c-border)', background: 'var(--c-panel)', cursor: 'pointer', color: 'var(--c-text-3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <button onClick={onToggleTheme} title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} style={{ width: 34, height: 34, borderRadius: '50%', border: '1px solid var(--c-border)', background: 'var(--c-panel)', cursor: 'pointer', color: 'var(--c-text-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', order: isMobile ? 0 : 0 }}>
             {theme === 'dark' ? (
               <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="5" /><path strokeLinecap="round" d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" /></svg>
             ) : (
@@ -710,11 +760,11 @@ export default function Dashboard({ user, onSignOut, theme, onToggleTheme }: Pro
             )}
           </button>
 
-          <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'linear-gradient(145deg,#4285f4,#1a73e8)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700 }}>{user.name.charAt(0).toUpperCase()}</div>
-          <button onClick={onSignOut} style={{ padding: '8px 12px', borderRadius: 18, border: '1px solid var(--c-border)', background: 'var(--c-panel)', color: 'var(--c-text-4)', fontSize: 12, cursor: 'pointer' }}>Sign out</button>
+          <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'linear-gradient(145deg,#4285f4,#1a73e8)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, order: isMobile ? 0 : 0 }}>{user.name.charAt(0).toUpperCase()}</div>
+          <button onClick={onSignOut} style={{ padding: '8px 12px', borderRadius: 18, border: '1px solid var(--c-border)', background: 'var(--c-panel)', color: 'var(--c-text-4)', fontSize: 12, cursor: 'pointer', order: isMobile ? 0 : 0 }}>Sign out</button>
         </header>
 
-        <main style={{ padding: '18px 20px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <main style={{ padding: isMobile ? '12px 12px 20px' : '18px 20px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
           {activeSection !== 'trash' && (
             <section style={{ border: '1px solid var(--c-border)', borderRadius: 18, padding: 14, background: 'var(--c-panel)' }}>
               <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
@@ -724,43 +774,16 @@ export default function Dashboard({ user, onSignOut, theme, onToggleTheme }: Pro
             </section>
           )}
 
-          <section style={{ border: '1px solid var(--c-border)', borderRadius: 18, padding: 14, background: 'var(--c-panel)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 10 }}>
+          <section style={{ border: '1px solid var(--c-border)', borderRadius: 18, padding: isMobile ? 10 : 14, background: 'var(--c-panel)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: isMobile ? 'wrap' : 'nowrap', marginBottom: 12, gap: 10 }}>
               <SectionLabel>{sectionTitle}{!loading && <span style={{ marginLeft: 8, padding: '2px 8px', borderRadius: 999, background: 'rgba(66,133,244,0.15)', color: '#4285f4', fontSize: 11, fontWeight: 700 }}>{showingCount}</span>}</SectionLabel>
-              {!isTrashView && !loading && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <button onClick={toggleSelectMode} style={{ border: '1px solid var(--c-border)', borderRadius: 999, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700, background: selectMode ? 'rgba(66,133,244,0.12)' : 'var(--c-panel-subtle)', color: selectMode ? '#1a73e8' : 'var(--c-text-3)' }}>
-                    {selectMode ? 'Batal' : 'Pilih'}
+              {!isTrashView && !loading && !selectMode && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: isMobile ? 'flex-start' : 'flex-end', width: isMobile ? '100%' : 'auto' }}>
+                  <button onClick={toggleSelectMode} style={{ border: '1px solid var(--c-border)', borderRadius: 999, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700, background: 'var(--c-panel-subtle)', color: 'var(--c-text-3)' }}>
+                    Pilih
                   </button>
-                  {selectMode && selectedSystemNames.length > 0 && (
-                    <button onClick={requestBulkDelete} style={{ border: '1px solid rgba(220,38,38,0.35)', borderRadius: 999, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700, background: 'rgba(220,38,38,0.12)', color: '#ef4444' }}>
-                      Delete {selectedSystemNames.length} selected
-                    </button>
-                  )}
-                  {selectMode && selectedSystemNames.length > 0 && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <select
-                        value={moveTargetFolder}
-                        onChange={(e) => setMoveTargetFolder(e.target.value)}
-                        style={{ border: '1px solid var(--c-border)', borderRadius: 999, padding: '6px 10px', background: 'var(--c-panel)', color: 'var(--c-text-3)', fontSize: 12, maxWidth: 170 }}
-                      >
-                        <option value="">Pilih folder tujuan</option>
-                        <option value="root">Root (All files)</option>
-                        {folders.map((folder) => (
-                          <option key={folder.id} value={String(folder.id)}>{folder.name}</option>
-                        ))}
-                      </select>
-                      <button
-                        onClick={moveSelectedFiles}
-                        disabled={!moveTargetFolder || movingSelected}
-                        style={{ border: '1px solid rgba(14,116,144,0.35)', borderRadius: 999, padding: '6px 12px', cursor: !moveTargetFolder || movingSelected ? 'not-allowed' : 'pointer', fontSize: 12, fontWeight: 700, background: 'rgba(14,116,144,0.14)', color: '#0e7490', opacity: !moveTargetFolder || movingSelected ? 0.6 : 1 }}
-                      >
-                        {movingSelected ? 'Memindahkan...' : `Move ${selectedSystemNames.length}`}
-                      </button>
-                    </div>
-                  )}
                   <div style={{ display: 'flex', gap: 4, padding: 3, borderRadius: 999, border: '1px solid var(--c-border)', background: 'var(--c-view-toggle)' }}>
-                    {(['list', 'grid'] as const).map((v) => (
+                    {(isMobile ? (['grid'] as const) : (['list', 'grid'] as const)).map((v) => (
                       <button key={v} onClick={() => setView(v)} style={{ border: 'none', borderRadius: 999, padding: '6px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: view === v ? 'var(--c-view-active)' : 'transparent', color: view === v ? '#1a73e8' : 'var(--c-text-4)' }}>
                         {v === 'list' ? 'List' : 'Grid'}
                       </button>
@@ -769,8 +792,21 @@ export default function Dashboard({ user, onSignOut, theme, onToggleTheme }: Pro
                 </div>
               )}
 
+              {!isTrashView && !loading && selectMode && (
+                <SelectionToolbar
+                  selectedCount={selectedSystemNames.length}
+                  moveTargetFolder={moveTargetFolder}
+                  movingSelected={movingSelected}
+                  folders={folders}
+                  onCancel={toggleSelectMode}
+                  onMoveFolderChange={setMoveTargetFolder}
+                  onMove={moveSelectedFiles}
+                  onDelete={requestBulkDelete}
+                />
+              )}
+
               {isTrashView && !loading && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: isMobile ? 'flex-start' : 'flex-end', width: isMobile ? '100%' : 'auto' }}>
                   <button onClick={toggleTrashSelectMode} style={{ border: '1px solid var(--c-border)', borderRadius: 999, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700, background: trashSelectMode ? 'rgba(66,133,244,0.12)' : 'var(--c-panel-subtle)', color: trashSelectMode ? '#1a73e8' : 'var(--c-text-3)' }}>
                     {trashSelectMode ? 'Batal' : 'Pilih'}
                   </button>
@@ -791,7 +827,7 @@ export default function Dashboard({ user, onSignOut, theme, onToggleTheme }: Pro
               )}
             </div>
 
-            {loading ? <LoadingSkeleton /> : isTrashView ? <TrashList items={filteredTrash} onRemove={removeTrashRecord} onRestore={requestRestoreTrash} selectionEnabled={trashSelectMode} selectedSystemNames={selectedTrashNames} onToggleSelect={toggleTrashSelection} onSelectAllVisible={selectAllTrash} /> : <FileList files={filteredFiles} view={view} onDelete={requestDelete} onGenerate={handleGenerate} onRequestMove={requestMoveSingleFile} folderOptions={folders.map((folder) => ({ id: folder.id, name: folder.name }))} getFolderLabel={getFolderLabel} onToggleStar={toggleStar} isStarred={(systemName) => files.some((f) => f.systemName === systemName && !!f.starred)} selectionEnabled={selectMode} selectedSystemNames={selectedSystemNames} onToggleSelect={toggleSelect} onSelectAllVisible={selectAllVisible} />}
+            {loading ? <LoadingSkeleton /> : isTrashView ? <TrashList items={filteredTrash} onRemove={removeTrashRecord} onRestore={requestRestoreTrash} selectionEnabled={trashSelectMode} selectedSystemNames={selectedTrashNames} onToggleSelect={toggleTrashSelection} onSelectAllVisible={selectAllTrash} isMobile={isMobile} /> : <FileList files={filteredFiles} view={effectiveView} onDelete={requestDelete} onGenerate={handleGenerate} onRequestMove={requestMoveSingleFile} folderOptions={folders.map((folder) => ({ id: folder.id, name: folder.name }))} getFolderLabel={getFolderLabel} onToggleStar={toggleStar} onTogglePublic={isAdminUser ? togglePublic : undefined} isStarred={(systemName) => files.some((f) => f.systemName === systemName && !!f.starred)} selectionEnabled={selectMode} selectedSystemNames={selectedSystemNames} onToggleSelect={toggleSelect} onSelectAllVisible={selectAllVisible} />}
 
             {!isTrashView && hasMore && !loading && (
               <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 8 }}>
@@ -870,9 +906,122 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   return <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--c-text-5)' }}>{children}</div>
 }
 
+function SelectionToolbar({
+  selectedCount,
+  moveTargetFolder,
+  movingSelected,
+  folders,
+  onCancel,
+  onMoveFolderChange,
+  onMove,
+  onDelete,
+}: {
+  selectedCount: number
+  moveTargetFolder: string
+  movingSelected: boolean
+  folders: FolderItem[]
+  onCancel: () => void
+  onMoveFolderChange: (val: string) => void
+  onMove: () => void
+  onDelete: () => void
+}) {
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      alignSelf: 'stretch',
+      padding: '6px 10px',
+      borderRadius: 12,
+      background: 'rgba(66,133,244,0.08)',
+      border: '1px solid rgba(66,133,244,0.2)',
+      flexWrap: 'wrap',
+    }}>
+      <button
+        onClick={onCancel}
+        title="Batal pilih"
+        style={{
+          border: 'none', background: 'transparent', cursor: 'pointer',
+          padding: 4, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: 'var(--c-text-4)',
+        }}
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      </button>
+
+      <span style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        fontSize: 13, fontWeight: 600, color: 'var(--c-text-2)',
+        paddingRight: 10, borderRight: '1px solid var(--c-border-subtle)',
+        whiteSpace: 'nowrap',
+      }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4285f4" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="9 11 12 14 22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+        </svg>
+        <span>{selectedCount} selected</span>
+      </span>
+
+      {selectedCount > 0 && (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <select
+              value={moveTargetFolder}
+              onChange={(e) => onMoveFolderChange(e.target.value)}
+              style={{
+                border: '1px solid var(--c-border)', borderRadius: 8,
+                padding: '5px 8px', background: 'var(--c-panel)',
+                color: 'var(--c-text-3)', fontSize: 12, maxWidth: 160,
+              }}
+            >
+              <option value="">Move to folder</option>
+              <option value="root">Root</option>
+              {folders.map((folder) => (
+                <option key={folder.id} value={String(folder.id)}>{folder.name}</option>
+              ))}
+            </select>
+            {moveTargetFolder && (
+              <button
+                onClick={onMove}
+                disabled={movingSelected}
+                style={{
+                  border: 'none', borderRadius: 8, padding: '5px 10px',
+                  background: 'linear-gradient(135deg,#0e7490,#155e75)', color: 'white',
+                  fontSize: 12, fontWeight: 600, cursor: movingSelected ? 'not-allowed' : 'pointer',
+                  opacity: movingSelected ? 0.6 : 1, whiteSpace: 'nowrap',
+                }}
+              >
+                {movingSelected ? 'Moving…' : 'Move'}
+              </button>
+            )}
+          </div>
+
+          <div style={{ flex: 1, minWidth: 0 }} />
+
+          <button
+            onClick={onDelete}
+            style={{
+              border: '1px solid rgba(220,38,38,0.35)', borderRadius: 8,
+              padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+              background: 'rgba(220,38,38,0.12)', color: '#ef4444',
+              display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            </svg>
+            Delete
+          </button>
+        </>
+      )}
+    </div>
+  )
+}
+
 function NavItem({ icon: Icon, label, active = false, count, onClick }: { icon?: React.ElementType; label: string; active?: boolean; count?: number; onClick: () => void }) {
   return (
-    <button onClick={onClick} style={{ width: '100%', textAlign: 'left', border: 'none', borderRadius: 12, padding: '8px 10px', fontSize: 13, fontWeight: active ? 700 : 500, color: active ? '#1a73e8' : 'var(--c-text-3)', background: active ? 'rgba(66,133,244,0.16)' : 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+    <button className={`fm-main-nav-item${active ? ' is-active' : ''}`} onClick={onClick} style={{ width: '100%', textAlign: 'left', border: 'none', borderRadius: 12, padding: '8px 10px', fontSize: 13, fontWeight: active ? 700 : 500, color: active ? '#1a73e8' : 'var(--c-text-3)', background: active ? 'rgba(66,133,244,0.16)' : 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
       <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         {Icon && <Icon size={15} color={active ? '#1a73e8' : 'var(--c-text-4)'} strokeWidth={active ? 2.5 : 2} />}
         {label}
@@ -896,13 +1045,44 @@ function NavItem({ icon: Icon, label, active = false, count, onClick }: { icon?:
   )
 }
 
-function TrashList({ items, onRemove, onRestore, selectionEnabled = false, selectedSystemNames = [], onToggleSelect, onSelectAllVisible }: { items: TrashItem[]; onRemove: (systemName: string) => void; onRestore: (systemName: string) => void; selectionEnabled?: boolean; selectedSystemNames?: string[]; onToggleSelect?: (systemName: string) => void; onSelectAllVisible?: (checked: boolean) => void }) {
+function TrashList({ items, onRemove, onRestore, selectionEnabled = false, selectedSystemNames = [], onToggleSelect, onSelectAllVisible, isMobile = false }: { items: TrashItem[]; onRemove: (systemName: string) => void; onRestore: (systemName: string) => void; selectionEnabled?: boolean; selectedSystemNames?: string[]; onToggleSelect?: (systemName: string) => void; onSelectAllVisible?: (checked: boolean) => void; isMobile?: boolean }) {
   if (!items.length) {
     return <div style={{ borderRadius: 12, border: '1px dashed var(--c-border)', background: 'var(--c-panel-subtle)', padding: '48px 16px', textAlign: 'center', color: 'var(--c-text-4)', fontSize: 13 }}>Trash is empty</div>
   }
 
   const allSelected = items.length > 0 && items.every((item) => selectedSystemNames.includes(item.systemName))
   const hasSomeSelected = items.some((item) => selectedSystemNames.includes(item.systemName))
+
+  if (isMobile) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {selectionEnabled && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--c-text-4)' }}>
+            <input type="checkbox" checked={allSelected} ref={(input) => { if (input) input.indeterminate = !allSelected && hasSomeSelected }} onChange={(e) => onSelectAllVisible?.(e.target.checked)} style={{ cursor: 'pointer' }} />
+            Select all
+          </label>
+        )}
+        {items.map((item) => (
+          <div key={item.systemName} style={{ borderRadius: 12, border: '1px solid var(--c-border)', background: 'var(--c-panel)', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+              {selectionEnabled && (
+                <input type="checkbox" checked={selectedSystemNames.includes(item.systemName)} onChange={() => onToggleSelect?.(item.systemName)} style={{ cursor: 'pointer', marginTop: 3 }} />
+              )}
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 13, color: 'var(--c-text-2)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.originalName}</div>
+                <div style={{ fontSize: 11, color: 'var(--c-text-5)' }}>Deleted {new Date(item.deletedAt).toLocaleString()}</div>
+              </div>
+              <span style={{ fontSize: 12, color: 'var(--c-text-4)', flexShrink: 0 }}>{formatBytes(item.size)}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <button onClick={() => onRestore(item.systemName)} style={{ border: '1px solid rgba(34,197,94,0.35)', background: 'rgba(34,197,94,0.1)', color: '#16a34a', padding: '6px 10px', borderRadius: 8, fontSize: 12, cursor: 'pointer' }}>Restore</button>
+              <button onClick={() => onRemove(item.systemName)} style={{ border: '1px solid rgba(220,38,38,0.35)', background: 'rgba(220,38,38,0.12)', color: '#ef4444', padding: '6px 10px', borderRadius: 8, fontSize: 12, cursor: 'pointer' }}>Delete permanen</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
 
   return (
     <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid var(--c-border)' }}>

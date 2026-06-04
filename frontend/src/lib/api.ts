@@ -50,6 +50,7 @@ function mapFileItem(item: Record<string, unknown>): FileMeta {
     downloadCount: Number(item.downloadCount ?? 0),
     shareCount: Number(item.shareCount ?? 0),
     starred: Boolean(item.starred ?? false),
+    isPublic: Boolean(item.isPublic ?? false),
   }
 }
 
@@ -92,7 +93,7 @@ export async function login(username: string, password: string): Promise<AuthUse
   }, { on401: 'silent' })
   if (!res.ok) throw new Error('auth failed')
   const body = await res.json()
-  return { id: body.data?.id ?? 'u-1', name: body.data?.name ?? username }
+  return { id: body.data?.id ?? 'u-1', name: body.data?.name ?? username, role: body.data?.role ?? 'user' }
 }
 
 export async function fetchSession(): Promise<AuthUser | null> {
@@ -104,6 +105,7 @@ export async function fetchSession(): Promise<AuthUser | null> {
   return {
     id: body.data?.id ?? '',
     name: body.data?.name ?? '',
+    role: body.data?.role ?? 'user',
   }
 }
 
@@ -230,9 +232,13 @@ export type PagedFiles = {
   total: number
 }
 
-export async function fetchFiles(folderId?: number): Promise<FileMeta[]> {
+export async function fetchFiles(folderId?: number, searchQuery?: string): Promise<FileMeta[]> {
   try {
-    const url = folderId ? `/api/files?folderId=${encodeURIComponent(String(folderId))}` : '/api/files'
+    const params = new URLSearchParams()
+    if (folderId) params.set('folderId', String(folderId))
+    const query = (searchQuery ?? '').trim()
+    if (query) params.set('q', query)
+    const url = params.size > 0 ? `/api/files?${params.toString()}` : '/api/files'
     const res = await request(url)
     if (!res.ok) return []
     const body = await res.json()
@@ -244,9 +250,12 @@ export async function fetchFiles(folderId?: number): Promise<FileMeta[]> {
   }
 }
 
-export async function fetchFilesPaginated(limit: number, offset: number): Promise<PagedFiles> {
+export async function fetchFilesPaginated(limit: number, offset: number, searchQuery?: string): Promise<PagedFiles> {
   try {
-    const url = `/api/files?limit=${limit}&offset=${offset}`
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+    const query = (searchQuery ?? '').trim()
+    if (query) params.set('q', query)
+    const url = `/api/files?${params.toString()}`
     const res = await request(url)
     if (!res.ok) return { files: [], total: 0 }
     const body = await res.json()
@@ -287,9 +296,11 @@ export async function fetchStarredFilesCount(): Promise<number> {
   }
 }
 
-export async function fetchTrashFiles(): Promise<FileMeta[]> {
+export async function fetchTrashFiles(searchQuery?: string): Promise<FileMeta[]> {
   try {
-    const res = await request('/api/trash')
+    const query = (searchQuery ?? '').trim()
+    const url = query ? `/api/trash?q=${encodeURIComponent(query)}` : '/api/trash'
+    const res = await request(url)
     if (!res.ok) return []
     const body = await res.json()
     const items: Array<Record<string, unknown>> = Array.isArray(body.data) ? body.data : []
@@ -351,6 +362,15 @@ export async function setFileStarred(systemName: string, starred: boolean): Prom
   if (!res.ok) throw new Error('Failed to update starred state')
 }
 
+export async function setFilePublic(systemName: string, isPublic: boolean): Promise<void> {
+  const res = await request(`/api/files/${encodeURIComponent(systemName)}/public`, {
+    method: 'PATCH',
+    headers: csrfHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ isPublic }),
+  })
+  if (!res.ok) throw new Error('Failed to update public state')
+}
+
 export async function hardDeleteTrashFile(systemName: string): Promise<void> {
   await request(`/api/trash/${encodeURIComponent(systemName)}`, {
     method: 'DELETE',
@@ -376,5 +396,28 @@ export async function generateLink(systemName: string): Promise<string> {
   if (!res.ok) throw new Error('Failed to generate link')
   const body = await res.json()
   // Return absolute URL so recipient can open it directly
+  return `${window.location.origin}${body.data?.downloadUrl ?? ''}`
+}
+
+export async function fetchPublicFiles(): Promise<FileMeta[]> {
+  try {
+    const res = await request('/api/public/files', { method: 'GET' }, { on401: 'silent' })
+    if (!res.ok) return []
+    const body = await res.json()
+    const items: Array<Record<string, unknown>> = Array.isArray(body.data) ? body.data : []
+    return items.map(mapFileItem)
+  } catch {
+    return []
+  }
+}
+
+export async function generatePublicLink(systemName: string): Promise<string> {
+  const res = await request('/api/public/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ systemName }),
+  }, { on401: 'silent' })
+  if (!res.ok) throw new Error('Failed to generate public link')
+  const body = await res.json()
   return `${window.location.origin}${body.data?.downloadUrl ?? ''}`
 }

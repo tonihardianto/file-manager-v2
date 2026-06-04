@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { UploadEntry } from './UploadDropzone'
 
 interface Props {
@@ -7,7 +7,20 @@ interface Props {
 }
 
 export default function UploadWidget({ entries, onDismiss }: Props) {
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.matchMedia('(max-width: 700px)').matches
+  })
   const [collapsed, setCollapsed] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const media = window.matchMedia('(max-width: 700px)')
+    const onChange = (event: MediaQueryListEvent) => setIsMobile(event.matches)
+    setIsMobile(media.matches)
+    media.addEventListener('change', onChange)
+    return () => media.removeEventListener('change', onChange)
+  }, [])
 
   if (!entries.length) return null
 
@@ -32,10 +45,12 @@ export default function UploadWidget({ entries, onDismiss }: Props) {
     <div
       style={{
         position: 'fixed',
-        bottom: 24,
-        right: 24,
+        bottom: isMobile ? 12 : 24,
+        right: isMobile ? 12 : 24,
+        left: isMobile ? 12 : 'auto',
         zIndex: 1000,
-        width: 320,
+        width: isMobile ? 'auto' : 320,
+        maxWidth: 'min(100vw - 24px, 320px)',
         borderRadius: 16,
         border: '1px solid var(--c-border)',
         background: 'var(--c-panel)',

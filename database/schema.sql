@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS files (
     path VARCHAR(500) NOT NULL,
     ukuran BIGINT NOT NULL,
     mime_type VARCHAR(100) NOT NULL,
+    is_public TINYINT(1) NOT NULL DEFAULT 0,
     jumlah_download BIGINT NOT NULL DEFAULT 0,
     jumlah_share BIGINT NOT NULL DEFAULT 0,
     is_starred TINYINT(1) NOT NULL DEFAULT 0,
@@ -44,6 +45,9 @@ CREATE TABLE IF NOT EXISTS files (
     FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE CASCADE,
     FOREIGN KEY (id_pengunggah) REFERENCES users(id) ON DELETE SET NULL
 );
+
+-- Migration note for existing deployments:
+-- ALTER TABLE files ADD COLUMN is_public TINYINT(1) NOT NULL DEFAULT 0;
 
 -- Insert a default admin user (password should be changed)
 -- password_hash is just a placeholder here, it should be generated securely (e.g. bcrypt)

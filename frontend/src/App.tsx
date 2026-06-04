@@ -1,12 +1,18 @@
 import { useEffect, useState } from 'react'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
+import PublicFiles from './pages/PublicFiles'
 import * as api from './lib/api'
 
-export type AuthUser = { id: string; name: string }
+export type AuthUser = { id: string; name: string; role?: string }
 export type Theme = 'dark' | 'light'
 
 function App() {
+  const pathname = typeof window !== 'undefined' ? window.location.pathname : '/'
+  const isPublicPage = pathname.startsWith('/shared')
+  const isLegacyPublicPage = pathname.startsWith('/public')
+  const isAuthPage = pathname === '/' || pathname.startsWith('/auth')
+
   const [user, setUser] = useState<AuthUser | null>(null)
   const [booting, setBooting] = useState(true)
   const [authNotice, setAuthNotice] = useState('')
@@ -15,6 +21,25 @@ function App() {
   })
 
   useEffect(() => {
+    if (isLegacyPublicPage) {
+      if (typeof window !== 'undefined') {
+        window.location.replace('/shared')
+      }
+      return
+    }
+
+    if (isPublicPage) {
+      setBooting(false)
+      return
+    }
+
+    if (!isAuthPage) {
+      if (typeof window !== 'undefined') {
+        window.location.replace('/')
+      }
+      return
+    }
+
     let cancelled = false
     api.fetchSession()
       .then((sessionUser) => {
@@ -26,7 +51,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [isAuthPage, isLegacyPublicPage, isPublicPage])
 
   useEffect(() => {
     const onUnauthorized = () => {
@@ -60,6 +85,10 @@ function App() {
   function handleLoginSuccess(nextUser: AuthUser) {
     setAuthNotice('')
     setUser(nextUser)
+  }
+
+  if (isPublicPage) {
+    return <PublicFiles theme={theme} onToggleTheme={toggleTheme} />
   }
 
   if (booting) {

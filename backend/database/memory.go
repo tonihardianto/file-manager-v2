@@ -72,6 +72,24 @@ func (s *InMemoryStore) ListFiles(ctx context.Context) ([]FileMetadata, error) {
 	return list, nil
 }
 
+func (s *InMemoryStore) ListPublicFiles(ctx context.Context) ([]FileMetadata, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	list := make([]FileMetadata, 0)
+	for _, v := range s.files {
+		if v.IsPublic {
+			list = append(list, v)
+		}
+	}
+
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].UploadedAt.After(list[j].UploadedAt)
+	})
+
+	return list, nil
+}
+
 func (s *InMemoryStore) ListFilesPaginated(ctx context.Context, limit, offset int64) ([]FileMetadata, int64, error) {
 	all, err := s.ListFiles(ctx)
 	if err != nil {
@@ -206,6 +224,19 @@ func (s *InMemoryStore) SetFileStarred(ctx context.Context, systemName string, s
 		return fmt.Errorf("file metadata not found for %s", systemName)
 	}
 	meta.Starred = starred
+	s.files[systemName] = meta
+	return nil
+}
+
+func (s *InMemoryStore) SetFilePublic(ctx context.Context, systemName string, isPublic bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	meta, exists := s.files[systemName]
+	if !exists {
+		return fmt.Errorf("file metadata not found for %s", systemName)
+	}
+	meta.IsPublic = isPublic
 	s.files[systemName] = meta
 	return nil
 }
