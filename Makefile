@@ -16,7 +16,7 @@ build-backend:
 # BARU: Build Go backend binary khusus untuk target Server Linux Ubuntu
 build-backend-linux:
 	@echo "Building Go backend binary for Linux (amd64)..."
-	GOOS=linux GOARCH=amd64 go build -o filemanager-linux ./backend
+	GOOS=linux GOARCH=amd64 go build -o filemanager-server ./backend
 
 # Build both frontend and backend
 build: build-frontend build-backend
@@ -24,7 +24,7 @@ build: build-frontend build-backend
 
 # Build frontend dan backend untuk keperluan DEPLOY ke Ubuntu
 build-server: build-frontend build-backend-linux
-	@echo "Build complete! Binary 'filemanager-linux' created for Ubuntu deployment."
+	@echo "Build complete! Binary 'filemanager-server' created for Ubuntu deployment."
 
 # Build dan run untuk lokal MacBook
 run: build-frontend build-backend
@@ -34,4 +34,4 @@ run: build-frontend build-backend
 clean:
 	rm -rf frontend/dist
 	rm -f filemanager
-	rm -f filemanager-linux
+	rm -f filemanager-server

@@ -97,6 +97,7 @@ export default function Dashboard({ user, onSignOut, theme, onToggleTheme }: Pro
   const [restoreTargets, setRestoreTargets] = useState<TrashItem[]>([])
   const [restoring, setRestoring] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [showScrollTop, setShowScrollTop] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -254,6 +255,12 @@ export default function Dashboard({ user, onSignOut, theme, onToggleTheme }: Pro
     }, 2600)
     return () => window.clearTimeout(timer)
   }, [toasts])
+
+  useEffect(() => {
+    const onScroll = () => setShowScrollTop(window.scrollY > 300)
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
 
   async function handleUpload(selected: File[]) {
     // Initial state — all pending
@@ -632,8 +639,8 @@ export default function Dashboard({ user, onSignOut, theme, onToggleTheme }: Pro
           : folderFilterMode === 'root'
             ? 'My Drive / Root'
             : selectedFolder
-            ? `My Drive / ${selectedFolder.name}`
-            : 'My Drive'
+              ? `My Drive / ${selectedFolder.name}`
+              : 'My Drive'
 
   const recentCount = globalTotalCount
   const effectiveView = isMobile ? 'grid' : view
@@ -690,11 +697,11 @@ export default function Dashboard({ user, onSignOut, theme, onToggleTheme }: Pro
               }}
               style={{ border: 'none', borderRadius: 8, textAlign: 'left', background: folderFilterMode === 'all' ? 'rgba(66,133,244,0.16)' : 'transparent', color: folderFilterMode === 'all' ? '#1a73e8' : 'var(--c-text-3)', cursor: 'pointer', fontSize: 12, padding: '6px 8px', fontWeight: folderFilterMode === 'all' ? 700 : 500, display: 'flex', alignItems: 'center', gap: 8 }}
             >
-                <Folder size={14} color={folderFilterMode === 'all' ? '#1a73e8' : 'var(--c-text-4)'} />
-                <span style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', justifyContent: 'space-between' }}>
-                  <span>All files</span>
-                  <span style={{ fontSize: 11, color: 'var(--c-text-5)' }}>{globalTotalCount}</span>
-                </span>
+              <Folder size={14} color={folderFilterMode === 'all' ? '#1a73e8' : 'var(--c-text-4)'} />
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', justifyContent: 'space-between' }}>
+                <span>All files</span>
+                <span style={{ fontSize: 11, color: 'var(--c-text-5)' }}>{globalTotalCount}</span>
+              </span>
             </button>
             <button
               className={`fm-folder-nav-item${folderFilterMode === 'root' ? ' is-active' : ''}`}
@@ -898,6 +905,36 @@ export default function Dashboard({ user, onSignOut, theme, onToggleTheme }: Pro
       )}
       {generatedLink && <CopyLinkModal url={generatedLink} onClose={() => setGeneratedLink(null)} />}
       <UploadWidget entries={uploadProgress} onDismiss={() => setUploadProgress([])} />
+
+      {showScrollTop && (
+        <button
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          aria-label="Back to top"
+          title="Back to top"
+          style={{
+            position: 'fixed',
+            bottom: 28,
+            right: 28,
+            zIndex: 70,
+            width: 42,
+            height: 42,
+            borderRadius: '50%',
+            border: '1px solid var(--c-border)',
+            background: 'var(--c-panel)',
+            color: 'var(--c-text-3)',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+            transition: 'opacity 0.2s, transform 0.2s',
+          }}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="18 15 12 9 6 15" />
+          </svg>
+        </button>
+      )}
     </div>
   )
 }
