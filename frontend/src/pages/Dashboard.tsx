@@ -288,14 +288,18 @@ export default function Dashboard({ user, onSignOut, theme, onToggleTheme }: Pro
         pushToast(setToasts, 'success', `Uploaded ${result.uploadedCount} file${result.uploadedCount > 1 ? 's' : ''} successfully`)
       }
       if (result.failedCount > 0) {
-        pushToast(setToasts, 'error', `${result.failedCount} file${result.failedCount > 1 ? 's' : ''} failed to upload`)
+        const reasons = result.failedFiles
+          .map((ff) => `${ff.fileName}: ${ff.reason}`)
+          .join('\n')
+        pushToast(setToasts, 'error', `${result.failedCount} file${result.failedCount > 1 ? 's' : ''} failed to upload${reasons ? `:\n${reasons}` : ''}`)
       }
 
       // Auto-dismiss widget after 4s
       window.setTimeout(() => setUploadProgress([]), 4000)
-    } catch {
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Upload failed'
       setUploadProgress(selected.map((f) => ({ name: f.name, percent: 0, status: 'error' as const })))
-      pushToast(setToasts, 'error', `Failed to upload ${selected.length} file${selected.length > 1 ? 's' : ''}`)
+      pushToast(setToasts, 'error', message)
       window.setTimeout(() => setUploadProgress([]), 4000)
     }
   }

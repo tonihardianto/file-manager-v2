@@ -204,7 +204,8 @@ export function uploadFiles(
       } else if (failedCount > 0 || uploadedCount > 0) {
         resolve(result)
       } else {
-        reject(new Error(`Upload failed: ${xhr.status}`))
+        const serverMessage = typeof body.message === 'string' ? body.message : ''
+        reject(new Error(`Upload failed: ${serverMessage || `HTTP ${xhr.status}`}`))
       }
     }
     xhr.onerror = () => reject(new Error('Network error during upload'))

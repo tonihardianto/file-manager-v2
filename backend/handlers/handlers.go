@@ -238,7 +238,7 @@ func MakeUploadHandler(engine storage.StorageEngine, metaStore database.Metadata
 			part.Close()
 
 			if saveErr != nil {
-				failed = append(failed, uploadFailure{FileName: originalName, Reason: "Failed to write to storage engine"})
+				failed = append(failed, uploadFailure{FileName: originalName, Reason: fmt.Sprintf("Failed to write to storage: %v", saveErr)})
 				continue
 			}
 
